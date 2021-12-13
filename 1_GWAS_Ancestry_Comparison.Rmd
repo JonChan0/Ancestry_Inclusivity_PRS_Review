@@ -1,0 +1,82 @@
+---
+title: "1_GWAS_Ancestry_Comparison"
+author: "Jonathan Chan"
+date: "13/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+# Comparison of Number of GWAS Participants by Self-Reported Ancestry
+
+## Aim
+
+The aim of this code is to output a comparative plot of the number of GWAS particpant by their ancestry to outline the ancestral disparities in population genetics studies. A reference plot can be found in Martin et al. (2019).
+
+## Method
+
+The GWAS Catalog (NHGRI-EBI) will be used as source of data for current GWAS studies - both published and unpublished.
+Hence, their V1.0.3 ancestry dataset will be used as the base dataset: https://www.ebi.ac.uk/gwas/api/search/downloads/ancestries_new
+
+The output .tsv file will be imported as a tibble (Tidyverse) into R and summary statistics across all studies will be carried out to derive a summary statistics table. This will then be transformed into a summative plot.
+
+```{r Data_Import}
+# Below code downloads the latest source data from GWAS catalog and imports it as a tibble into R and discarding columns which aren't required.
+Sys.time()
+download.file('https://www.ebi.ac.uk/gwas/api/search/downloads/ancestries_new', 'ancestry_GWAS.tsv')
+base_data <- read_tsv('ancestry_GWAS.tsv') %>%
+  filter(!str_detect(`BROAD ANCESTRAL CATEGORY`,'.?NR.?'))
+  select(1,3,4,5,6,8,9)
+```
+
+The broad ancestral categories that will be compared  will be:
+* European
+* East Asian
+* South/Other Asian
+* African
+* Hispanic/Latino
+* Greater Middle Eastern
+* Oceanian
+* Other
+* Multiple
+
+```{r Ancestry_Cleaner}
+# Below code filters the dataset into individual tibbles corresponding to studies for each of the broad ancestral categories, excluding the non-reported multiple ancestry categories and simplifying labels to the broad ancestral categories, and then recombines them into a simplified tibble.
+
+european <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('European'))
+e_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('East Asian'))
+s_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('South Asian','South East Asian','Central Asian', 'Asian unspecified'))
+s_asian$`BROAD ANCESTRAL CATEGORY` <- 'South/Other Asian'
+  
+african <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('African American or Afro-Caribbean','African unspecified', 'Sub-Saharan African', 'African American or Afro-Caribbean, African unspecified', 'African unspecified, African American or Afro-Caribbean', 'Sub-Saharan African, African unspecified', '	
+African unspecified, Sub-Saharan African', 'Sub-Saharan African, African American or Afro-Caribbean'))
+african$`BROAD ANCESTRAL CATEGORY` <- 'African'
+
+hispanic <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Hispanic or Latin American'))
+gme <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Greater Middle Eastern (Middle Eastern, North African or Persian)'))
+gme$`BROAD ANCESTRAL CATEGORY` <- 'Greater Middle Eastern'
+
+oceanian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Oceanian','Aboriginal Australian'))
+oceanian$`BROAD ANCESTRAL CATEGORY` <- 'Oceanian'
+
+other <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Native American','Other','Other admixed ancestry'))
+other$`BROAD ANCESTRAL CATEGORY` <- 'Other'
+
+multiple <- filter(base_data, str_detect(`BROAD ANCESTRAL CATEGORY`, ',')) %>%
+  filter(!(`BROAD ANCESTRAL CATEGORY`  %in% c('Greater Middle Eastern (Middle Eastern, North African or Persian)','African American or Afro-Caribbean, African unspecified', 'African unspecified, African American or Afro-Caribbean', 'Sub-Saharan African, African unspecified', '	
+African unspecified, Sub-Saharan African','Sub-Saharan African, African American or Afro-Caribbean')))
+multiple$`BROAD ANCESTRAL CATEGORY` <- 'Multiple'
+
+total_simple_base_data <- bind_rows(european, e_asian, s_asian, african, hispanic, gme, oceanian, other, multiple) %>%
+  arrange(DATE)
+```
+
+```{r Comparative_Plot}
+# The following code plots the comparative time series plot with y-axis
+
+```
+
