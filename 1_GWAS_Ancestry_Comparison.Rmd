@@ -7,8 +7,14 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
 library(lubridate)
+library(magrittr)
+library(RColorBrewer)
+library(stringr)
+library(tibble)
 ```
 
 # Comparison of Number of GWAS Participants by Self-Reported Ancestry
@@ -44,12 +50,18 @@ The broad ancestral categories that will be compared  will be:
 * Other
 * Multiple
 
-```{r Ancestry_Cleaner}
-# Below code filters the dataset into individual tibbles corresponding to studies for each of the broad ancestral categories, excluding the non-reported multiple ancestry categories and simplifying labels to the broad ancestral categories, and then recombines them into a simplified tibble.
+Below code filters the dataset into individual tibbles corresponding to studies for each of the broad ancestral categories, excluding the non-reported multiple ancestry categories and simplifying labels to the broad ancestral categories, and then recombines them into a simplified tibble.
 
+Note that additional filtering occurs to remove
+* GWAS studies with NA values for the number of individuals involved
+
+Note that the actual metric of number of GWAS participants means that the same individuals e.g of UK Biobank can be used for multiple GWASs for different traits both within the same publication and between different publications - hence predominance of European GWAS participants.
+
+```{r Ancestry_Cleaner}
 european <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('European'))
-e_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('East Asian'))
-s_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('South Asian','South East Asian','Central Asian', 'Asian unspecified'))
+e_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('East Asian', 'East Asian, Asian unspecified'))
+e_asian$`BROAD ANCESTRAL CATEGORY` <- 'East Asian'
+s_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('South Asian','South East Asian','Central Asian', 'Asian unspecified', 'South Asian, East Asian ', 'South Asian, South East Asian', 'South Asian, South East Asian, East Asian','South East Asian, East Asian', 'South East Asian, South Asian, East Asian'))
 s_asian$`BROAD ANCESTRAL CATEGORY` <- 'South/Other Asian'
   
 african <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('African American or Afro-Caribbean','African unspecified', 'Sub-Saharan African', 'African American or Afro-Caribbean, African unspecified', 'African unspecified, African American or Afro-Caribbean', 'Sub-Saharan African, African unspecified', '	
@@ -60,23 +72,65 @@ hispanic <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Hispanic or Lat
 gme <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Greater Middle Eastern (Middle Eastern, North African or Persian)'))
 gme$`BROAD ANCESTRAL CATEGORY` <- 'Greater Middle Eastern'
 
-oceanian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Oceanian','Aboriginal Australian'))
-oceanian$`BROAD ANCESTRAL CATEGORY` <- 'Oceanian'
-
-other <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Native American','Other','Other admixed ancestry'))
+other <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('Native American','Oceanian','Aboriginal Australian','Other','Other admixed ancestry'))
 other$`BROAD ANCESTRAL CATEGORY` <- 'Other'
 
 multiple <- filter(base_data, str_detect(`BROAD ANCESTRAL CATEGORY`, ',')) %>%
-  filter(!(`BROAD ANCESTRAL CATEGORY`  %in% c('Greater Middle Eastern (Middle Eastern, North African or Persian)','African American or Afro-Caribbean, African unspecified', 'African unspecified, African American or Afro-Caribbean', 'Sub-Saharan African, African unspecified', '	
-African unspecified, Sub-Saharan African','Sub-Saharan African, African American or Afro-Caribbean')))
+  filter(!(`BROAD ANCESTRAL CATEGORY`  %in%  c('Greater Middle Eastern (Middle Eastern, North African or Persian)', 'Sub-Saharan African, African American or Afro-Caribbean', 'Sub-Saharan African, African unspecified', 'East Asian, Asian unspecified', 'South Asian, East Asian ', 'South Asian, South East Asian', 'South Asian, South East Asian, East Asian','South East Asian, East Asian', 'South East Asian, South Asian, East Asian')))
+
 multiple$`BROAD ANCESTRAL CATEGORY` <- 'Multiple'
 
-total_simple_base_data <- bind_rows(european, e_asian, s_asian, african, hispanic, gme, oceanian, other, multiple) %>%
+total_simple_base_data <- bind_rows(european, e_asian, s_asian, african, hispanic, gme, other, multiple) %>%
+  arrange(DATE) %>%
+  filter(!is.na(`NUMBER OF INDIVIDUALS`)) %>%
+  mutate(ANCESTRY = as.factor(`BROAD ANCESTRAL CATEGORY`))
+
+#Calculating cumulative sum of GWAS participants per broad ancestral category
+cum_simple_base_data <- total_simple_base_data %>%
+  group_by(ANCESTRY) %>%
+  mutate(CUMULATIVE_INDIVIDUALS = cumsum(as.numeric(`NUMBER OF INDIVIDUALS`))) %>% # Sums over all the studies within a single publication!
+  group_by(DATE, ANCESTRY) %>%
+  slice(which.max(CUMULATIVE_INDIVIDUALS)) #Takes the max cumulative value per date and per ancestry
+
+#Creating a tibble where each study has an option to update each ancestry type over time so each ancestry spans all of the time period
+expansion <- cum_simple_base_data %>%
+    arrange(DATE) %>% 
+    expand(DATE, ANCESTRY) %>% 
+    distinct()
+
+expanded_cum_data <- full_join(cum_simple_base_data, expansion, by=c('DATE', 'ANCESTRY')) %>%
   arrange(DATE)
+expanded_cum_data$CUMULATIVE_INDIVIDUALS[2:10] <- 0 #Setting starting values of GWAS participants = 0 for non-Europeans
+
+expanded_cum_data <- expanded_cum_data %>%
+  group_by(ANCESTRY) %>%
+  mutate(TIME_CUM = na.locf(CUMULATIVE_INDIVIDUALS, fromLast=F, na.rm=F))
 ```
 
-```{r Comparative_Plot}
-# The following code plots the comparative time series plot with y-axis
+The following code plots the comparative time series plot with one y-axis of millions of individuals and second y-axis of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound). 
 
+```{r Comparative_Plot}
+#Plotting time series plot with cumulative sum
+p1 <- ggplot(expanded_cum_data)+
+  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, col =fct_rev(reorder(ANCESTRY, TIME_CUM)), fill = fct_rev(reorder(ANCESTRY, TIME_CUM))), position = 'stack')+
+  ylab('Number of GWAS Participants (millions)')+
+  xlab('')+
+  scale_x_date(date_breaks = '2 years', date_labels = '%Y')+
+  scale_colour_brewer(type = 'qual', palette='Dark2' )+
+  scale_fill_brewer(type = 'qual', palette='Dark2' ) +
+  labs(fill='Ancestry',colour='Ancestry')+
+  theme_classic() +
+  theme(axis.text = element_text(color='black'),
+        axis.text.x = element_text(angle=90, vjust=0.5, hjust=2),
+        axis.title.y = element_text(vjust = 1.5),
+        text = element_text(size=14),
+        legend.position = c(0.05, 1),
+        legend.justification = c(0, 1),
+        legend.text = element_text(size=12),
+        legend.background = element_rect(fill = "transparent", colour = NA))
+  
+
+ggsave('cumulative_sum_time_series.pdf', p1)
+print(p1)
 ```
 
