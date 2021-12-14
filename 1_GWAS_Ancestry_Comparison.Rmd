@@ -15,6 +15,7 @@ library(magrittr)
 library(RColorBrewer)
 library(stringr)
 library(tibble)
+library(ggrepel)
 ```
 
 # Comparison of Number of GWAS Participants by Self-Reported Ancestry
@@ -107,17 +108,25 @@ expanded_cum_data <- expanded_cum_data %>%
   mutate(TIME_CUM = na.locf(CUMULATIVE_INDIVIDUALS, fromLast=F, na.rm=F))
 ```
 
-The following code plots the comparative time series plot with one y-axis of millions of individuals and second y-axis of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound). 
+The following code plots the comparative time series plot with one y-axis of millions of individuals. 
 
 ```{r Comparative_Plot}
 #Plotting time series plot with cumulative sum
+
+# Establishing the colour vector
+col_vector <- brewer.pal(8,'Dark2')
+names(col_vector) <- levels(expanded_cum_data$ANCESTRY)
+
+#col_vector <- fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))
+
+
 p1 <- ggplot(expanded_cum_data)+
-  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, col =fct_rev(reorder(ANCESTRY, TIME_CUM)), fill = fct_rev(reorder(ANCESTRY, TIME_CUM))), position = 'stack')+
+  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, col = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM)), fill = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))), position = 'stack')+
   ylab('Number of GWAS Participants (millions)')+
   xlab('')+
   scale_x_date(date_breaks = '2 years', date_labels = '%Y')+
-  scale_colour_brewer(type = 'qual', palette='Dark2' )+
-  scale_fill_brewer(type = 'qual', palette='Dark2' ) +
+  scale_colour_manual(values=col_vector)+
+  scale_fill_manual(values=col_vector)+
   labs(fill='Ancestry',colour='Ancestry')+
   theme_classic() +
   theme(axis.text = element_text(color='black'),
@@ -131,6 +140,47 @@ p1 <- ggplot(expanded_cum_data)+
   
 
 ggsave('cumulative_sum_time_series.pdf', p1)
-print(p1)
+```
+
+The following code plots the second plot with y-axis right-aligned of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound) using the same colour palette as the first plot.
+
+```{r Fold_Change_Plot}
+
+earlier_period_data <- total_simple_base_data %>%
+  filter(as.Date(DATE) >= ymd('2016-01-01') & as.Date(DATE) < ymd('2019-01-01')) %>%
+  group_by(ANCESTRY) %>%
+  summarise(EARLIER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
+
+latter_period_data <- total_simple_base_data %>%
+  filter(as.Date(DATE) >= ymd('2019-01-01') & as.Date(DATE) < ymd('2022-01-01')) %>%
+  group_by(ANCESTRY) %>%
+  summarise(LATER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
+
+cumsum_ancestry <- expanded_cum_data %>%
+  group_by(ANCESTRY) %>%
+  summarise(MAX.CUMSUM = max(TIME_CUM))
+
+combined_period_data <- full_join(earlier_period_data, latter_period_data) %>%
+  full_join(cumsum_ancestry) %>%
+  mutate(FOLD.CHANGE = LATER.PERIOD.SUM/EARLIER.PERIOD.SUM)
+
+p2 <- ggplot(combined_period_data)+
+  geom_boxplot(aes(x=1, y= FOLD.CHANGE), colour = 'black', fill='light grey', size = 1)+
+  geom_point(aes(x=1, y=FOLD.CHANGE, col = fct_rev(reorder(ANCESTRY, MAX.CUMSUM))), size = 2.5)+
+  scale_colour_manual(values=col_vector)+
+  scale_x_discrete(breaks = NULL, labels=NULL) +
+  scale_y_continuous(position = 'right', breaks=seq(0,30,2))+
+  ylab('Fold Change from 2019-2022 vs. 2016-2019')+
+  xlab('')+
+  theme_classic()+
+  theme(legend.position = 'none',
+        axis.text = element_text(color='black'),
+        axis.title.y = element_text(vjust =1.5),
+        axis.line.x = element_line(linetype='blank'),
+        axis.line.y = element_line(lineend='round'),
+        text = element_text(size=14),
+        plot.margin = unit(c(1, 7, 1, 7), "cm"))
+
+ggsave('fold_change.pdf', p2)
 ```
 
