@@ -1,0 +1,122 @@
+---
+title: "2_LD_Simulated_Multi_Ancestry"
+author: "Jonathan Chan"
+date: "17/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(magrittr)
+library(RColorBrewer)
+library(stringr)
+library(tibble)
+library(ggrepel)
+library(readr)
+```
+
+# Simulator of Cross-Ancestry LD
+
+This script outputs a figure inspired by Amariutu et al. (2020) which indicates how differences in LD between two ancestries can result in differing p-value significance and effect size estimates even for the same causal variants.
+
+```{r p_value_simulator}
+set.seed(1)
+
+tagSNPs <- seq(1,100,1) # Simulates a sequence of SNPs from marker 1 to 50
+
+EUR_pvalues <- sample(seq(1:5),100, replace = TRUE)
+EAS_pvalues <- sample(seq(1:5),100, replace = TRUE) # Establishes the baseline non-significant
+
+
+p_value_marker <- function(p_values, causal_variant_locations){
+  # Chooses a random number of SNPs around each causal variant to have substantial p-value
+  n_substantial <- sample(seq(5,8),length(causal_variant_locations), replace = TRUE)
+  
+  # Chooses location of marker SNPs which have substantial p-values using a binomial distribution
+  
+  substantial_p_locations <- vector('list', length=length(causal_variant_locations))
+  
+  for (i in seq_along(n_substantial)){
+    substantial_p_locations[[i]] <- sample(seq(causal_variant_locations[i]-5,causal_variant_locations[i]+5),n_substantial[i]) #Generates a random vector of locations about each causal variant with n_substantial[i] locations
+  }
+  
+  # Assign substantial p_values to each of the locations generated in substantial_p_locations
+  
+  substantial_p_locations <- unlist(substantial_p_locations) %>%
+    c(causal_variant_locations) %>% #Merge with causal_variant locations
+    sort() %>%
+    unique()
+  
+  #print(substantial_p_locations)
+  
+  substantial_p_values <- vector('list', length=length(causal_variant_locations)) 
+  
+  for (i in seq_along(n_substantial)){
+    substantial_p_values[[i]] <- rnorm(n_substantial[i] +1, mean = sample(50:100,1),sd = sample(5:20,1)) #Specifying the number of substantial SNPs + 1x causal SNP
+  }
+  
+  for (i in seq_along(substantial_p_values)){
+    max_index <- which(substantial_p_values[[i]] == max(substantial_p_values[[i]]))
+    substantial_p_values[[i]][[max_index]] <- substantial_p_values[[i]][[max_index]] ^ 2
+  }
+  substantial_p_values <- unlist(substantial_p_values)
+  
+  #Replacing the pvalues
+  for (i in seq_along(substantial_p_values)){
+    p_values[substantial_p_locations[i]] <- substantial_p_values[i]
+  }
+  
+  return(p_values)
+}
+
+EUR_p <- p_value_marker(EUR_pvalues, c(23,52,79))
+EAS_p <- p_value_marker(EAS_pvalues, c(23,52,79))
+
+total_tb <- tibble(tagSNPs, EUR_p, EAS_p) %>%
+  rename('EUR'=EUR_p, 'EAS'=EAS_p) %>%
+  pivot_longer(cols=c(EUR,EAS),names_to='Ancestry',values_to='pvalues')
+  
+```
+
+```{r LD_plot}
+
+#Adding labels for causal variants; lead SNPs to total_tb
+
+total_tb <- total_tb %>%
+  mutate(causal = tagSNPs == 23 | tagSNPs == 52 | tagSNPs == 79) %>%
+  mutate(causal = as.factor(causal))
+
+total_tb <- total_tb %>%
+  mutate(lead_EUR = pvalues == max(pvalues))
+
+causal_vars_only <- total_tb %>%
+  filter(causal == TRUE)
+
+
+
+
+p1 <-ggplot(total_tb)+
+  geom_point(aes(x=tagSNPs, y=pvalues)) +
+  xlab('Genome Position')+
+  ylab ('GWAS-derived p-value significance')+
+  scale_x_discrete(breaks=NULL,labels=NULL)+
+  scale_y_continuous(breaks=NULL, labels=NULL,limits=c(0,max(total_tb$pvalues)+5))+
+  facet_wrap(vars(Ancestry), nrow=2, ncol=1, strip.position='right', as.table=FALSE, scales='free') +
+  theme_classic()+
+  theme(axis.line.x=element_line(size=1),
+        axis.line.y=element_line(size=1),
+        text=element_text(size=14),
+        legend.position = 'none',
+        plot.margin = unit(c(1, 1, 1, 1), "cm"),
+        axis.title.y =element_text(vjust = 2),
+        axis.title.x =element_text(vjust = -2))
+
+print(p1)
+ggsave('LD_comparative_plot.pdf',p1)
+
+```
+

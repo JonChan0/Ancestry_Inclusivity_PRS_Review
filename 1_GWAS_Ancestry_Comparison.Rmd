@@ -16,6 +16,14 @@ library(RColorBrewer)
 library(stringr)
 library(tibble)
 library(ggrepel)
+library(readr)
+library(zoo)
+library(forcats)
+library(cowplot)
+library(gridExtra)
+
+theme_set(theme(text = element_text(family='Arial')))
+  
 ```
 
 # Comparison of Number of GWAS Participants by Self-Reported Ancestry
@@ -36,8 +44,9 @@ The output .tsv file will be imported as a tibble (Tidyverse) into R and summary
 Sys.time()
 download.file('https://www.ebi.ac.uk/gwas/api/search/downloads/ancestries_new', 'ancestry_GWAS.tsv')
 base_data <- read_tsv('ancestry_GWAS.tsv') %>%
-  filter(!str_detect(`BROAD ANCESTRAL CATEGORY`,'.?NR.?'))
-  select(1,3,4,5,6,8,9)
+  filter(!str_detect(`BROAD ANCESTRAL CATEGORY`,'.?NR.?')) %>%
+  select(1,3,4,5,6,8,9) #%>%
+  #filter(DATE < '2022-01-01')
 ```
 
 The broad ancestral categories that will be compared  will be:
@@ -60,9 +69,9 @@ Note that the actual metric of number of GWAS participants means that the same i
 
 ```{r Ancestry_Cleaner}
 european <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('European'))
-e_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('East Asian', 'East Asian, Asian unspecified'))
-e_asian$`BROAD ANCESTRAL CATEGORY` <- 'East Asian'
-s_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('South Asian','South East Asian','Central Asian', 'Asian unspecified', 'South Asian, East Asian ', 'South Asian, South East Asian', 'South Asian, South East Asian, East Asian','South East Asian, East Asian', 'South East Asian, South Asian, East Asian'))
+e_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('East Asian','South East Asian', 'East Asian, Asian unspecified'))
+e_asian$`BROAD ANCESTRAL CATEGORY` <- c('East Asian')
+s_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('South Asian','Central Asian', 'Asian unspecified', 'South Asian, East Asian ', 'South Asian, South East Asian', 'South Asian, South East Asian, East Asian','South East Asian, East Asian', 'South East Asian, South Asian, East Asian'))
 s_asian$`BROAD ANCESTRAL CATEGORY` <- 'South/Other Asian'
   
 african <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('African American or Afro-Caribbean','African unspecified', 'Sub-Saharan African', 'African American or Afro-Caribbean, African unspecified', 'African unspecified, African American or Afro-Caribbean', 'Sub-Saharan African, African unspecified', '	
@@ -95,6 +104,7 @@ cum_simple_base_data <- total_simple_base_data %>%
 
 #Creating a tibble where each study has an option to update each ancestry type over time so each ancestry spans all of the time period
 expansion <- cum_simple_base_data %>%
+    ungroup() %>%
     arrange(DATE) %>% 
     expand(DATE, ANCESTRY) %>% 
     distinct()
@@ -113,19 +123,29 @@ The following code plots the comparative time series plot with one y-axis of mil
 ```{r Comparative_Plot}
 #Plotting time series plot with cumulative sum
 
+#Establishing order of ANCESTRY factor
+ancestry_order <- expanded_cum_data %>%
+  group_by(ANCESTRY) %>%
+  summarise(ANCESTRY, max_cum_value = max(CUMULATIVE_INDIVIDUALS, na.rm=TRUE)) %>%
+  distinct() %>%
+  arrange(-max_cum_value)
+
+expanded_cum_data <- expanded_cum_data %>%
+  mutate(ANCESTRY = factor(ANCESTRY, levels=ancestry_order$ANCESTRY))
+
 # Establishing the colour vector
-col_vector <- brewer.pal(8,'Dark2')
+col_vector <- brewer.pal(8,'Set2')
 names(col_vector) <- levels(expanded_cum_data$ANCESTRY)
 
 #col_vector <- fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))
 
 
-p1 <- ggplot(expanded_cum_data)+
-  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, col = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM)), fill = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))), position = 'stack')+
+cumulative_plot <- ggplot(expanded_cum_data)+
+  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, fill = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))), position = 'stack', col = 'black')+
   ylab('Number of GWAS Participants (millions)')+
   xlab('')+
   scale_x_date(date_breaks = '2 years', date_labels = '%Y')+
-  scale_colour_manual(values=col_vector)+
+  scale_y_continuous(breaks=c(0,1000,2000,3000,4000,5000),labels=c('0','1,000','2,000','3,000','4,000','5,000'))+
   scale_fill_manual(values=col_vector)+
   labs(fill='Ancestry',colour='Ancestry')+
   theme_classic() +
@@ -137,12 +157,15 @@ p1 <- ggplot(expanded_cum_data)+
         legend.justification = c(0, 1),
         legend.text = element_text(size=12),
         legend.background = element_rect(fill = "transparent", colour = NA))
-  
 
-ggsave('cumulative_sum_time_series.pdf', p1)
+print(cumulative_plot)
+
+#ggsave('cumulative_plots.png', device='png',width=7, height=7, units = 'in', plot = cumulative_plot)
+
+
 ```
 
-The following code plots the second plot with y-axis right-aligned of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound) using the same colour palette as the first plot.
+The following code plots the second plot with y-axis left-aligned of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound) using the same colour palette as the first plot.
 
 ```{r Fold_Change_Plot}
 
@@ -162,25 +185,50 @@ cumsum_ancestry <- expanded_cum_data %>%
 
 combined_period_data <- full_join(earlier_period_data, latter_period_data) %>%
   full_join(cumsum_ancestry) %>%
-  mutate(FOLD.CHANGE = LATER.PERIOD.SUM/EARLIER.PERIOD.SUM)
+  mutate(FOLD.CHANGE = LATER.PERIOD.SUM/EARLIER.PERIOD.SUM) %>%
+  ungroup() %>%
+  mutate(LABEL = case_when(FOLD.CHANGE >= 10 ~ as.character(ANCESTRY),
+                           TRUE ~ ''))
 
-p2 <- ggplot(combined_period_data)+
-  geom_boxplot(aes(x=1, y= FOLD.CHANGE), colour = 'black', fill='light grey', size = 1)+
-  geom_point(aes(x=1, y=FOLD.CHANGE, col = fct_rev(reorder(ANCESTRY, MAX.CUMSUM))), size = 2.5)+
+individual_period_data <- combined_period_data %>%
+  select(1:3) %>%
+  pivot_longer(c(2,3), names_to='Time_Period', values_to='Sum')
+  
+fold_change_plot <- ggplot(combined_period_data, aes(x='2019-2021\nvs.\n2016-2018', y= FOLD.CHANGE))+
+  geom_boxplot(colour = 'black', fill='light grey', width = 1)+
+  geom_point(aes(col = fct_rev(reorder(ANCESTRY, MAX.CUMSUM))), size = 2.5)+
+ # geom_label_repel(aes(col=ANCESTRY, label=LABEL), show.legend=FALSE, nudge_x = 1)+
   scale_colour_manual(values=col_vector)+
-  scale_x_discrete(breaks = NULL, labels=NULL) +
-  scale_y_continuous(position = 'right', breaks=seq(0,30,2))+
-  ylab('Fold Change from 2019-2022 vs. 2016-2019')+
+  scale_y_continuous(position = 'right', breaks=seq(0,30,5), limits = c(0,30))+
+  ylab(str_wrap('Fold Change in Number of GWAS Participants', width=45))+
   xlab('')+
   theme_classic()+
   theme(legend.position = 'none',
-        axis.text = element_text(color='black'),
-        axis.title.y = element_text(vjust =1.5),
-        axis.line.x = element_line(linetype='blank'),
-        axis.line.y = element_line(lineend='round'),
-        text = element_text(size=14),
-        plot.margin = unit(c(1, 7, 1, 7), "cm"))
+        axis.title.y = element_text(vjust=-1.5),
+        text = element_text(size=14, colour='black'),
+        axis.text.x =  element_text(angle=90, vjust=0.5, colour='black'),
+        axis.text.y = element_text(colour='black')
+        )
 
-ggsave('fold_change.pdf', p2)
+print(fold_change_plot)
+ggsave('fold_change.png', device='png',width=7, height=7, units = 'in', plot = fold_change_plot)
+
+combo_plot <- plot_grid(cumulative_plot, fold_change_plot, align='h', rel_widths = c(0.8,0.2))
+print(combo_plot)
+ggsave('combo_plot.png',device='png',height = 7, width = 7, units='in', combo_plot)
+
+
+plot_list <- list(cumulative_plot, fold_change_plot)
+
+multiple_plot_exporter <- function(input_plot_list, pdf_name){ #Function to export several ggplot objects into single pdf
+  
+  pdf(paste(pdf_name,'.pdf', sep=''), onefile=TRUE)
+  for (i in seq_along(input_plot_list)){
+    print(input_plot_list[[i]])
+  }
+  dev.off()
+}
+plot.margin = unit(c(1, 7, 1, 7), "cm")
+multiple_plot_exporter(plot_list, 'gwas_plots')
 ```
 

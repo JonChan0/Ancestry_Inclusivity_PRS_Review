@@ -181,6 +181,145 @@ pre code {
 <h2>Method</h2>
 <p>The GWAS Catalog (NHGRI-EBI) will be used as source of data for current GWAS studies - both published and unpublished. Hence, their V1.0.3 ancestry dataset will be used as the base dataset: <a href="https://www.ebi.ac.uk/gwas/api/search/downloads/ancestries_new" class="uri">https://www.ebi.ac.uk/gwas/api/search/downloads/ancestries_new</a></p>
 <p>The output .tsv file will be imported as a tibble (Tidyverse) into R and summary statistics across all studies will be carried out to derive a summary statistics table. This will then be transformed into a summative plot.</p>
+<pre class="r"><code># Below code downloads the latest source data from GWAS catalog and imports it as a tibble into R and discarding columns which aren&#39;t required.
+Sys.time()</code></pre>
+<pre><code>## [1] &quot;2021-12-17 10:05:50 NZDT&quot;</code></pre>
+<pre class="r"><code>download.file(&#39;https://www.ebi.ac.uk/gwas/api/search/downloads/ancestries_new&#39;, &#39;ancestry_GWAS.tsv&#39;)
+base_data &lt;- read_tsv(&#39;ancestry_GWAS.tsv&#39;) %&gt;%
+  filter(!str_detect(`BROAD ANCESTRAL CATEGORY`,&#39;.?NR.?&#39;)) %&gt;%
+  select(1,3,4,5,6,8,9)</code></pre>
+<pre><code>## Warning: One or more parsing issues, see `problems()` for details</code></pre>
+<pre><code>## Rows: 44156 Columns: 19</code></pre>
+<pre><code>## -- Column specification --------------------------------------------------------
+## Delimiter: &quot;\t&quot;
+## chr  (9): STUDY ACCESSION, FIRST AUTHOR, INITIAL SAMPLE DESCRIPTION, REPLICA...
+## dbl  (2): PUBMED ID, NUMBER OF INDIVIDUALS
+## lgl  (7): ANCESTRY DESCRIPTOR, FOUNDER/GENETICALLY ISOLATED POPULATION, NUMB...
+## date (1): DATE</code></pre>
+<pre><code>## 
+## i Use `spec()` to retrieve the full column specification for this data.
+## i Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
+<p>The broad ancestral categories that will be compared will be: * European * East Asian * South/Other Asian * African * Hispanic/Latino * Greater Middle Eastern * Oceanian * Other * Multiple</p>
+<p>Below code filters the dataset into individual tibbles corresponding to studies for each of the broad ancestral categories, excluding the non-reported multiple ancestry categories and simplifying labels to the broad ancestral categories, and then recombines them into a simplified tibble.</p>
+<p>Note that additional filtering occurs to remove * GWAS studies with NA values for the number of individuals involved</p>
+<p>Note that the actual metric of number of GWAS participants means that the same individuals e.g of UK Biobank can be used for multiple GWASs for different traits both within the same publication and between different publications - hence predominance of European GWAS participants.</p>
+<pre class="r"><code>european &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;European&#39;))
+e_asian &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;East Asian&#39;, &#39;East Asian, Asian unspecified&#39;))
+e_asian$`BROAD ANCESTRAL CATEGORY` &lt;- &#39;East Asian&#39;
+s_asian &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;South Asian&#39;,&#39;South East Asian&#39;,&#39;Central Asian&#39;, &#39;Asian unspecified&#39;, &#39;South Asian, East Asian &#39;, &#39;South Asian, South East Asian&#39;, &#39;South Asian, South East Asian, East Asian&#39;,&#39;South East Asian, East Asian&#39;, &#39;South East Asian, South Asian, East Asian&#39;))
+s_asian$`BROAD ANCESTRAL CATEGORY` &lt;- &#39;South/Other Asian&#39;
+  
+african &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;African American or Afro-Caribbean&#39;,&#39;African unspecified&#39;, &#39;Sub-Saharan African&#39;, &#39;African American or Afro-Caribbean, African unspecified&#39;, &#39;African unspecified, African American or Afro-Caribbean&#39;, &#39;Sub-Saharan African, African unspecified&#39;, &#39;   
+African unspecified, Sub-Saharan African&#39;, &#39;Sub-Saharan African, African American or Afro-Caribbean&#39;))
+african$`BROAD ANCESTRAL CATEGORY` &lt;- &#39;African&#39;
+
+hispanic &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;Hispanic or Latin American&#39;))
+gme &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;Greater Middle Eastern (Middle Eastern, North African or Persian)&#39;))
+gme$`BROAD ANCESTRAL CATEGORY` &lt;- &#39;Greater Middle Eastern&#39;
+
+other &lt;- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c(&#39;Native American&#39;,&#39;Oceanian&#39;,&#39;Aboriginal Australian&#39;,&#39;Other&#39;,&#39;Other admixed ancestry&#39;))
+other$`BROAD ANCESTRAL CATEGORY` &lt;- &#39;Other&#39;
+
+multiple &lt;- filter(base_data, str_detect(`BROAD ANCESTRAL CATEGORY`, &#39;,&#39;)) %&gt;%
+  filter(!(`BROAD ANCESTRAL CATEGORY`  %in%  c(&#39;Greater Middle Eastern (Middle Eastern, North African or Persian)&#39;, &#39;Sub-Saharan African, African American or Afro-Caribbean&#39;, &#39;Sub-Saharan African, African unspecified&#39;, &#39;East Asian, Asian unspecified&#39;, &#39;South Asian, East Asian &#39;, &#39;South Asian, South East Asian&#39;, &#39;South Asian, South East Asian, East Asian&#39;,&#39;South East Asian, East Asian&#39;, &#39;South East Asian, South Asian, East Asian&#39;)))
+
+multiple$`BROAD ANCESTRAL CATEGORY` &lt;- &#39;Multiple&#39;
+
+total_simple_base_data &lt;- bind_rows(european, e_asian, s_asian, african, hispanic, gme, other, multiple) %&gt;%
+  arrange(DATE) %&gt;%
+  filter(!is.na(`NUMBER OF INDIVIDUALS`)) %&gt;%
+  mutate(ANCESTRY = as.factor(`BROAD ANCESTRAL CATEGORY`))
+
+#Calculating cumulative sum of GWAS participants per broad ancestral category
+cum_simple_base_data &lt;- total_simple_base_data %&gt;%
+  group_by(ANCESTRY) %&gt;%
+  mutate(CUMULATIVE_INDIVIDUALS = cumsum(as.numeric(`NUMBER OF INDIVIDUALS`))) %&gt;% # Sums over all the studies within a single publication!
+  group_by(DATE, ANCESTRY) %&gt;%
+  slice(which.max(CUMULATIVE_INDIVIDUALS)) #Takes the max cumulative value per date and per ancestry
+
+#Creating a tibble where each study has an option to update each ancestry type over time so each ancestry spans all of the time period
+expansion &lt;- cum_simple_base_data %&gt;%
+    arrange(DATE) %&gt;% 
+    expand(DATE, ANCESTRY) %&gt;% 
+    distinct()
+
+expanded_cum_data &lt;- full_join(cum_simple_base_data, expansion, by=c(&#39;DATE&#39;, &#39;ANCESTRY&#39;)) %&gt;%
+  arrange(DATE)
+expanded_cum_data$CUMULATIVE_INDIVIDUALS[2:10] &lt;- 0 #Setting starting values of GWAS participants = 0 for non-Europeans
+
+expanded_cum_data &lt;- expanded_cum_data %&gt;%
+  group_by(ANCESTRY) %&gt;%
+  mutate(TIME_CUM = na.locf(CUMULATIVE_INDIVIDUALS, fromLast=F, na.rm=F))</code></pre>
+<p>The following code plots the comparative time series plot with one y-axis of millions of individuals.</p>
+<pre class="r"><code>#Plotting time series plot with cumulative sum
+
+# Establishing the colour vector
+col_vector &lt;- brewer.pal(8,&#39;Dark2&#39;)
+names(col_vector) &lt;- levels(expanded_cum_data$ANCESTRY)
+
+#col_vector &lt;- fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))
+
+
+p1 &lt;- ggplot(expanded_cum_data)+
+  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, col = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM)), fill = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))), position = &#39;stack&#39;)+
+  ylab(&#39;Number of GWAS Participants (millions)&#39;)+
+  xlab(&#39;&#39;)+
+  scale_x_date(date_breaks = &#39;2 years&#39;, date_labels = &#39;%Y&#39;)+
+  scale_colour_manual(values=col_vector)+
+  scale_fill_manual(values=col_vector)+
+  labs(fill=&#39;Ancestry&#39;,colour=&#39;Ancestry&#39;)+
+  theme_classic() +
+  theme(axis.text = element_text(color=&#39;black&#39;),
+        axis.text.x = element_text(angle=90, vjust=0.5, hjust=2),
+        axis.title.y = element_text(vjust = 1.5),
+        text = element_text(size=14),
+        legend.position = c(0.05, 1),
+        legend.justification = c(0, 1),
+        legend.text = element_text(size=12),
+        legend.background = element_rect(fill = &quot;transparent&quot;, colour = NA))
+  
+
+ggsave(&#39;cumulative_sum_time_series.pdf&#39;, p1)</code></pre>
+<pre><code>## Saving 7 x 5 in image</code></pre>
+<p>The following code plots the second plot with y-axis right-aligned of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound) using the same colour palette as the first plot.</p>
+<pre class="r"><code>earlier_period_data &lt;- total_simple_base_data %&gt;%
+  filter(as.Date(DATE) &gt;= ymd(&#39;2016-01-01&#39;) &amp; as.Date(DATE) &lt; ymd(&#39;2019-01-01&#39;)) %&gt;%
+  group_by(ANCESTRY) %&gt;%
+  summarise(EARLIER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
+
+latter_period_data &lt;- total_simple_base_data %&gt;%
+  filter(as.Date(DATE) &gt;= ymd(&#39;2019-01-01&#39;) &amp; as.Date(DATE) &lt; ymd(&#39;2022-01-01&#39;)) %&gt;%
+  group_by(ANCESTRY) %&gt;%
+  summarise(LATER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
+
+cumsum_ancestry &lt;- expanded_cum_data %&gt;%
+  group_by(ANCESTRY) %&gt;%
+  summarise(MAX.CUMSUM = max(TIME_CUM))
+
+combined_period_data &lt;- full_join(earlier_period_data, latter_period_data) %&gt;%
+  full_join(cumsum_ancestry) %&gt;%
+  mutate(FOLD.CHANGE = LATER.PERIOD.SUM/EARLIER.PERIOD.SUM)</code></pre>
+<pre><code>## Joining, by = &quot;ANCESTRY&quot;
+## Joining, by = &quot;ANCESTRY&quot;</code></pre>
+<pre class="r"><code>p2 &lt;- ggplot(combined_period_data)+
+  geom_boxplot(aes(x=1, y= FOLD.CHANGE), colour = &#39;black&#39;, fill=&#39;light grey&#39;, size = 1)+
+  geom_point(aes(x=1, y=FOLD.CHANGE, col = fct_rev(reorder(ANCESTRY, MAX.CUMSUM))), size = 2.5)+
+  scale_colour_manual(values=col_vector)+
+  scale_x_discrete(breaks = NULL, labels=NULL) +
+  scale_y_continuous(position = &#39;right&#39;, breaks=seq(0,30,2))+
+  ylab(&#39;Fold Change from 2019-2022 vs. 2016-2019&#39;)+
+  xlab(&#39;&#39;)+
+  theme_classic()+
+  theme(legend.position = &#39;none&#39;,
+        axis.text = element_text(color=&#39;black&#39;),
+        axis.title.y = element_text(vjust =1.5),
+        axis.line.x = element_line(linetype=&#39;blank&#39;),
+        axis.line.y = element_line(lineend=&#39;round&#39;),
+        text = element_text(size=14),
+        plot.margin = unit(c(1, 7, 1, 7), &quot;cm&quot;))
+
+ggsave(&#39;fold_change.pdf&#39;, p2)</code></pre>
+<pre><code>## Saving 7 x 5 in image</code></pre>
 </div>
 </div>
 
