@@ -68,6 +68,9 @@ Note that additional filtering occurs to remove
 Note that the actual metric of number of GWAS participants means that the same individuals e.g of UK Biobank can be used for multiple GWASs for different traits both within the same publication and between different publications - hence predominance of European GWAS participants.
 
 ```{r Ancestry_Cleaner}
+
+#Assigning broad ancestral groups to each ancestry heading of European etc.
+
 european <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('European'))
 e_asian <- filter(base_data, `BROAD ANCESTRAL CATEGORY` %in% c('East Asian','South East Asian', 'East Asian, Asian unspecified'))
 e_asian$`BROAD ANCESTRAL CATEGORY` <- c('East Asian')
@@ -90,6 +93,7 @@ multiple <- filter(base_data, str_detect(`BROAD ANCESTRAL CATEGORY`, ',')) %>%
 
 multiple$`BROAD ANCESTRAL CATEGORY` <- 'Multiple'
 
+#Collating all the ancestry data together into a tibble
 total_simple_base_data <- bind_rows(european, e_asian, s_asian, african, hispanic, gme, other, multiple) %>%
   arrange(DATE) %>%
   filter(!is.na(`NUMBER OF INDIVIDUALS`)) %>%
@@ -102,67 +106,43 @@ cum_simple_base_data <- total_simple_base_data %>%
   group_by(DATE, ANCESTRY) %>%
   slice(which.max(CUMULATIVE_INDIVIDUALS)) #Takes the max cumulative value per date and per ancestry
 
-#Creating a tibble where each study has an option to update each ancestry type over time so each ancestry spans all of the time period
-expansion <- cum_simple_base_data %>%
-    ungroup() %>%
-    arrange(DATE) %>% 
-    expand(DATE, ANCESTRY) %>% 
-    distinct()
-
-expanded_cum_data <- full_join(cum_simple_base_data, expansion, by=c('DATE', 'ANCESTRY')) %>%
-  arrange(DATE)
-expanded_cum_data$CUMULATIVE_INDIVIDUALS[2:10] <- 0 #Setting starting values of GWAS participants = 0 for non-Europeans
-
-expanded_cum_data <- expanded_cum_data %>%
+#Creates simple tibble showing the current cumulative number of individuals per ancestry
+simp_current_cum_data <- cum_simple_base_data %>%
   group_by(ANCESTRY) %>%
-  mutate(TIME_CUM = na.locf(CUMULATIVE_INDIVIDUALS, fromLast=F, na.rm=F))
+  summarise(ANCESTRY, CURRENT_CUMULATIVE_INDIVIDUALS = max(CUMULATIVE_INDIVIDUALS)) %>%
+  unique() %>%
+  arrange(-CURRENT_CUMULATIVE_INDIVIDUALS)
+
+#Assigns an order to the ancestry with most individuals ranked no.1 etc.
+simp_current_cum_data <- simp_current_cum_data %>%
+  mutate(ANCESTRY = factor(ANCESTRY, levels=simp_current_cum_data$ANCESTRY))
 ```
 
-The following code plots the comparative time series plot with one y-axis of millions of individuals. 
+The following code plots the comparative stacked bar chart.
 
 ```{r Comparative_Plot}
-#Plotting time series plot with cumulative sum
-
-#Establishing order of ANCESTRY factor
-ancestry_order <- expanded_cum_data %>%
-  group_by(ANCESTRY) %>%
-  summarise(ANCESTRY, max_cum_value = max(CUMULATIVE_INDIVIDUALS, na.rm=TRUE)) %>%
-  distinct() %>%
-  arrange(-max_cum_value)
-
-expanded_cum_data <- expanded_cum_data %>%
-  mutate(ANCESTRY = factor(ANCESTRY, levels=ancestry_order$ANCESTRY))
 
 # Establishing the colour vector
 col_vector <- brewer.pal(8,'Set2')
-names(col_vector) <- levels(expanded_cum_data$ANCESTRY)
+names(col_vector) <- levels(simp_current_cum_data$ANCESTRY)
 
-#col_vector <- fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))
-
-
-cumulative_plot <- ggplot(expanded_cum_data)+
-  geom_area(aes(x=as.Date(DATE), y=TIME_CUM/10^6, fill = fct_rev(reorder(expanded_cum_data$ANCESTRY, expanded_cum_data$TIME_CUM))), position = 'stack', col = 'black')+
-  ylab('Number of GWAS Participants (millions)')+
+#Plots a single bar chart representing the current state of GWAS diversity via cumulative individuals
+cumulative_bar_chart <- ggplot(simp_current_cum_data)+
+  geom_col(aes(x='',y=CURRENT_CUMULATIVE_INDIVIDUALS/10^6, fill=ANCESTRY), pos=position_stack(reverse=TRUE))+
+  ylab('Cumulative Number of GWAS Participants (millions)')+
   xlab('')+
-  scale_x_date(date_breaks = '2 years', date_labels = '%Y')+
   scale_y_continuous(breaks=c(0,1000,2000,3000,4000,5000),labels=c('0','1,000','2,000','3,000','4,000','5,000'))+
+  scale_x_discrete(labels=c('Oct 2022'))+
   scale_fill_manual(values=col_vector)+
-  labs(fill='Ancestry',colour='Ancestry')+
-  theme_classic() +
+  labs(fill='Ancestry')+
+  theme_classic()+
   theme(axis.text = element_text(color='black'),
-        axis.text.x = element_text(angle=90, vjust=0.5, hjust=2),
         axis.title.y = element_text(vjust = 1.5),
-        text = element_text(size=14),
-        legend.position = c(0.05, 1),
-        legend.justification = c(0, 1),
-        legend.text = element_text(size=12),
-        legend.background = element_rect(fill = "transparent", colour = NA))
+        text = element_text(size=14, colour='black'),
+        axis.text.x =  element_text(vjust=0.5, colour='black'),
+        legend.position='top')
 
-print(cumulative_plot)
-
-#ggsave('cumulative_plots.png', device='png',width=7, height=7, units = 'in', plot = cumulative_plot)
-
-
+print(cumulative_bar_chart)
 ```
 
 The following code plots the second plot with y-axis left-aligned of fold-change of number of individuals from 2019-2022 for each ancestry compared to 2016-2019 (non-inclusive upper bound) using the same colour palette as the first plot.
@@ -179,24 +159,18 @@ latter_period_data <- total_simple_base_data %>%
   group_by(ANCESTRY) %>%
   summarise(LATER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
 
-cumsum_ancestry <- expanded_cum_data %>%
-  group_by(ANCESTRY) %>%
-  summarise(MAX.CUMSUM = max(TIME_CUM))
 
 combined_period_data <- full_join(earlier_period_data, latter_period_data) %>%
-  full_join(cumsum_ancestry) %>%
+  full_join(simp_current_cum_data) %>%
   mutate(FOLD.CHANGE = LATER.PERIOD.SUM/EARLIER.PERIOD.SUM) %>%
   ungroup() %>%
   mutate(LABEL = case_when(FOLD.CHANGE >= 10 ~ as.character(ANCESTRY),
                            TRUE ~ ''))
 
-individual_period_data <- combined_period_data %>%
-  select(1:3) %>%
-  pivot_longer(c(2,3), names_to='Time_Period', values_to='Sum')
   
 fold_change_plot <- ggplot(combined_period_data, aes(x='2019-2021\nvs.\n2016-2018', y= FOLD.CHANGE))+
   geom_boxplot(colour = 'black', fill='light grey', width = 1)+
-  geom_point(aes(col = fct_rev(reorder(ANCESTRY, MAX.CUMSUM))), size = 2.5)+
+  geom_point(aes(col = fct_rev(reorder(ANCESTRY, CURRENT_CUMULATIVE_INDIVIDUALS))), size = 2.5)+
  # geom_label_repel(aes(col=ANCESTRY, label=LABEL), show.legend=FALSE, nudge_x = 1)+
   scale_colour_manual(values=col_vector)+
   scale_y_continuous(position = 'right', breaks=seq(0,30,5), limits = c(0,30))+
@@ -206,19 +180,29 @@ fold_change_plot <- ggplot(combined_period_data, aes(x='2019-2021\nvs.\n2016-201
   theme(legend.position = 'none',
         axis.title.y = element_text(vjust=-1.5),
         text = element_text(size=14, colour='black'),
-        axis.text.x =  element_text(angle=90, vjust=0.5, colour='black'),
+        axis.text.x =  element_text(vjust=0.5, colour='black'),
         axis.text.y = element_text(colour='black')
         )
 
 print(fold_change_plot)
-ggsave('fold_change.png', device='png',width=7, height=7, units = 'in', plot = fold_change_plot)
+#ggsave('fold_change.png', device='png',width=7, height=7, units = 'in', plot = fold_change_plot)
 
-combo_plot <- plot_grid(cumulative_plot, fold_change_plot, align='h', rel_widths = c(0.8,0.2))
+combo_plot <- plot_grid(cumulative_bar_chart + theme(legend.position='none') #Removes the legend to allow adding later
+                        , fold_change_plot, align='h', rel_widths = c(0.5,0.5))
 print(combo_plot)
-ggsave('combo_plot.png',device='png',height = 7, width = 7, units='in', combo_plot)
+
+#Add the legend to combo plot at the top
+legend <- get_legend(cumulative_bar_chart+
+                       theme(legend.box.margin = margin(0,3,0,3,unit='in')))
+combo_plot_legend <- plot_grid(legend,combo_plot, ncol=1, rel_heights=c(0.1,1))
+print(combo_plot_legend)
+
+ggsave('combo_plot.png',device='png',height = 7, width = 7, units='in', combo_plot_legend)
 
 
-plot_list <- list(cumulative_plot, fold_change_plot)
+
+#To export the individual plots
+plot_list <- list(cumulative_bar_chart, fold_change_plot)
 
 multiple_plot_exporter <- function(input_plot_list, pdf_name){ #Function to export several ggplot objects into single pdf
   
