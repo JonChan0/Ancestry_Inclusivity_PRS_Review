@@ -201,18 +201,18 @@ ggsave('combo_plot.png',device='png',height = 7, width = 7, units='in', combo_pl
 
 
 
-#To export the individual plots
-plot_list <- list(cumulative_bar_chart, fold_change_plot)
-
-multiple_plot_exporter <- function(input_plot_list, pdf_name){ #Function to export several ggplot objects into single pdf
-  
-  pdf(paste(pdf_name,'.pdf', sep=''), onefile=TRUE)
-  for (i in seq_along(input_plot_list)){
-    print(input_plot_list[[i]])
-  }
-  dev.off()
-}
-plot.margin = unit(c(1, 7, 1, 7), "cm")
-multiple_plot_exporter(plot_list, 'gwas_plots')
+# #To export the individual plots
+# plot_list <- list(cumulative_bar_chart, fold_change_plot)
+# 
+# multiple_plot_exporter <- function(input_plot_list, pdf_name){ #Function to export several ggplot objects into single pdf
+#   
+#   pdf(paste(pdf_name,'.pdf', sep=''), onefile=TRUE)
+#   for (i in seq_along(input_plot_list)){
+#     print(input_plot_list[[i]])
+#   }
+#   dev.off()
+# }
+# plot.margin = unit(c(1, 7, 1, 7), "cm")
+# multiple_plot_exporter(plot_list, 'gwas_plots')
 ```
 
