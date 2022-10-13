@@ -140,7 +140,8 @@ cumulative_bar_chart <- ggplot(simp_current_cum_data)+
         axis.title.y = element_text(vjust = 1.5),
         text = element_text(size=14, colour='black'),
         axis.text.x =  element_text(vjust=0.5, colour='black'),
-        legend.position='top')
+        legend.position='top')+
+  guides(fill=guide_legend(nrow=3))
 
 print(cumulative_bar_chart)
 ```
@@ -192,8 +193,7 @@ combo_plot <- plot_grid(cumulative_bar_chart + theme(legend.position='none') #Re
 print(combo_plot)
 
 #Add the legend to combo plot at the top
-legend <- get_legend(cumulative_bar_chart+
-                       theme(legend.box.margin = margin(0,3,0,3,unit='in')))
+legend <- get_legend(cumulative_bar_chart)
 combo_plot_legend <- plot_grid(legend,combo_plot, ncol=1, rel_heights=c(0.1,1))
 print(combo_plot_legend)
 
