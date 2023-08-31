@@ -132,7 +132,7 @@ cumulative_bar_chart <- ggplot(simp_current_cum_data)+
   ylab('Cumulative Number of GWAS Participants (millions)')+
   xlab('')+
   scale_y_continuous(breaks=c(0,1000,2000,3000,4000,5000),labels=c('0','1,000','2,000','3,000','4,000','5,000'))+
-  scale_x_discrete(labels=c('Oct 2022'))+
+  scale_x_discrete(labels=c('Aug 2023'))+
   scale_fill_manual(values=col_vector)+
   labs(fill='Ancestry')+
   theme_classic()+
@@ -151,12 +151,12 @@ The following code plots the second plot with y-axis left-aligned of fold-change
 ```{r Fold_Change_Plot}
 
 earlier_period_data <- total_simple_base_data %>%
-  filter(as.Date(DATE) >= ymd('2016-01-01') & as.Date(DATE) < ymd('2019-01-01')) %>%
+  filter(as.Date(DATE) >= ymd('2017-01-01') & as.Date(DATE) < ymd('2020-01-01')) %>%
   group_by(ANCESTRY) %>%
   summarise(EARLIER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
 
 latter_period_data <- total_simple_base_data %>%
-  filter(as.Date(DATE) >= ymd('2019-01-01') & as.Date(DATE) < ymd('2022-01-01')) %>%
+  filter(as.Date(DATE) >= ymd('2020-01-01') & as.Date(DATE) < ymd('2023-01-01')) %>%
   group_by(ANCESTRY) %>%
   summarise(LATER.PERIOD.SUM = sum(`NUMBER OF INDIVIDUALS`))
 
@@ -169,7 +169,7 @@ combined_period_data <- full_join(earlier_period_data, latter_period_data) %>%
                            TRUE ~ ''))
 
   
-fold_change_plot <- ggplot(combined_period_data, aes(x='2019-2021\nvs.\n2016-2018', y= FOLD.CHANGE))+
+fold_change_plot <- ggplot(combined_period_data, aes(x='2020-2022\nvs.\n2017-2019', y= FOLD.CHANGE))+
   geom_boxplot(colour = 'black', fill='light grey', width = 1)+
   geom_point(aes(col = fct_rev(reorder(ANCESTRY, CURRENT_CUMULATIVE_INDIVIDUALS))), size = 2.5)+
  # geom_label_repel(aes(col=ANCESTRY, label=LABEL), show.legend=FALSE, nudge_x = 1)+
